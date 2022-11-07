@@ -875,4 +875,75 @@ dev.off()
 
 ```
 
+```{r}
+ttest_rf_matrix<-as.data.frame(t(combined_TP_tmm))
+ttest_rf_matrix$group=make_label(ttest_rf_matrix)
 
+ttest_pl<-sapply(ttest_rf_matrix[,-13934], function(i) t.test(i ~ ttest_rf_matrix$group)$p.value)
+pbh<-p.adjust(ttest_pl, method = 'BH', n = length(ttest_pl))
+sum(pbh<0.01)
+
+ttest_validation_matrix <- as.data.frame(t(combined_TP_tmm[names(sort(pbh)[1:500]), ]))
+ttest_validation_matrix$isLUAD <- make_label(ttest_validation_matrix)
+# Start Splitting the data (using the same gene order as DGE_machine_learning_matrix_HTSeq and with the same seed)
+set.seed(12)
+ttest_train.rf.val.HTSeq <- train.DGE.HTSeq
+ttest_val.rf.train.HTSeq <- ttest_validation_matrix[ttest_train.rf.val.HTSeq,]
+ttest_val.rf.test.HTSeq <- ttest_validation_matrix[-ttest_train.rf.val.HTSeq,]
+table(ttest_val.rf.test.HTSeq$isLUAD)
+# Cross validation using train for mRMR
+library(caret)
+tgrid <- expand.grid(
+  .mtry = 1:30,
+  .splitrule = "gini", 
+  .min.node.size = 1
+)
+set.seed(12)
+ttest_val.rf.cv <- train(isLUAD ~ ., 
+                   data = ttest_val.rf.train.HTSeq,
+                   method = "ranger",
+                   tuneGrid = tgrid,
+                   trControl = trainControl(method = "cv", number = 5, verboseIter = TRUE)
+                   )
+ttest_val.rf.cv #mtry = 28
+# Training the Data and Testing 
+set.seed(12)
+ttest_val_rf.HTSeq <- ranger(isLUAD ~ ., mtry = 28, data = ttest_val.rf.train.HTSeq, importance = "impurity")
+ttest_val_pred_HTSeq <- predict(ttest_val_rf.HTSeq, data = ttest_val.rf.test.HTSeq)
+ttest_val_accuracy.HTSeq <- tableAccuracy(ttest_val_pred_HTSeq$predictions, ttest_val.rf.test.HTSeq$isLUAD)
+ttest_val_accuracy.HTSeq
+table(ttest_val_pred_HTSeq$predictions, ttest_val.rf.test.HTSeq$isLUAD)
+ranger_ttest_val_gini.HTSeq <- as.data.frame(ttest_val_rf.HTSeq$variable.importance)
+setDT(ranger_ttest_val_gini.HTSeq, keep.rownames = TRUE)[]
+colnames(ranger_ttest_val_gini.HTSeq) <- c("Gene", "Gini")
+ranger_ttest_val_gini_table <- ranger_ttest_val_gini.HTSeq %>% arrange(desc(Gini))
+ranger_ttest_val_gini_table
+
+#Bootstrapping for the overlapping genes
+ttest_rf_test_set <- data.frame(response = as.numeric(ttest_val.rf.test.HTSeq$isLUAD), prediction = as.numeric(ttest_val_pred_HTSeq$predictions), baseline = 0)
+ttest_rf_boot <- boot(ttest_rf_test_set, all_metrics, R= 10000) # this took a long time: don't run again unless nescessary
+ttest_rf_boot_plot_results <- data.frame(accuracyestimates = ttest_rf_boot$t[,4], delta = ttest_rf_boot$t[,4] - ttest_rf_boot$t0[4])
+ttest_rf_boot_plot_results
+boot.ci(ttest_rf_boot, index = 4, type = "perc")
+
+cm=table(ttest_val_pred_HTSeq$predictions, ttest_val.rf.test.HTSeq$isLUAD)
+sen=sensitivity(table(ttest_val_pred_HTSeq$predictions, ttest_val.rf.test.HTSeq$isLUAD))
+spe=specificity(table(ttest_val_pred_HTSeq$predictions, ttest_val.rf.test.HTSeq$isLUAD))
+f_1=2*cm[2,2]/(2*cm[2,2]+cm[2,1]+cm[1,2])
+pre=cm[2,2]/(cm[2,1]+cm[2,2])
+```
+```{r}
+kmpvalue=c(0.037,0.14,0.000016,0.28,0.0000043,8.6*10^(-16),0.47,0.022,0.0093,0.0012,0.14,0.0091,0.47,0.0076,0.83,0.000023,0.021)
+kmpvalue.aj<-
+  p.adjust(kmpvalue, method = 'BH', n = length(kmpvalue))
+kmpvalue2=c(0.39,0.13,0.92,1,0.55,0.92,0.049,0.57,0.51,0.3,0.63,0.83,0.83,0.67,0.22,0.18,0.66)
+kmpvalue.aj2<-
+  p.adjust(kmpvalue2, method = 'BH', n = length(kmpvalue))
+kmpvalue3=c(0.085,0.83,3.3*10^(-9),3.8*10^(-5),0.29,0.00023,4.1*10^(-8),0.28,0.014,1.6*10^(-5),0.031)
+kmpvalue.aj3<-
+  p.adjust(kmpvalue3, method = 'BH', n = length(kmpvalue3))
+kmpvalue4=c(0.54,0.22,0.19,0.82,0.3,0.12,0.62,1,0.71,0.92,0.81)
+kmpvalue.aj4<-
+  p.adjust(kmpvalue4, method = 'BH', n = length(kmpvalue4))
+
+```
